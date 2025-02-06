@@ -1,33 +1,34 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { Settings, DEFAULT_SETTINGS, Model, ModelProvider } from '../types/settings';
 
-interface Settings {
-  selectedModel: 'openai' | 'anthropic';
-}
-
-interface SecureSettings {
-  openaiKey: string;
-  anthropicKey: string;
-}
-
-interface SettingsState extends Settings, SecureSettings {
+interface SettingsState extends Settings {
   isLoading: boolean;
-  setSettings: (settings: Partial<Settings & SecureSettings>) => void;
+  setSettings: (settings: Partial<Settings>) => void;
+  setModel: (model: Model) => void;
+  setProvider: (provider: ModelProvider) => void;
   loadSettings: () => Promise<void>;
   saveSettings: () => Promise<void>;
+  validateApiKey: (provider: ModelProvider) => Promise<boolean>;
 }
 
 const SETTINGS_FILE = 'settings.json';
 const KEYCHAIN_SERVICE = 'synapse-api-keys';
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  openaiKey: '',
-  anthropicKey: '',
-  selectedModel: 'openai',
+  ...DEFAULT_SETTINGS,
   isLoading: false,
 
   setSettings: (settings) => {
     set((state) => ({ ...state, ...settings }));
+  },
+
+  setModel: (model) => {
+    set({ selectedModel: model });
+  },
+
+  setProvider: (provider) => {
+    set({ defaultProvider: provider });
   },
 
   loadSettings: async () => {
@@ -40,11 +41,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           options: { dir: 'App' }
         });
         if (contents) {
-          const settings = JSON.parse(contents) as Settings;
-          set((state) => ({ ...state, ...settings }));
+          const settings = JSON.parse(contents) as Partial<Settings>;
+          // Create a new settings object without API keys
+          const sanitizedSettings: Partial<Settings> = {
+            ...settings,
+            openai: settings.openai ? { ...settings.openai, apiKey: '' } : undefined,
+            anthropic: settings.anthropic ? { ...settings.anthropic, apiKey: '' } : undefined
+          };
+          set((state) => ({ ...state, ...sanitizedSettings }));
         }
       } catch (error) {
-        // File might not exist on first run, which is fine
         console.log('No existing settings file found');
       }
 
@@ -61,8 +67,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         
         set((state) => ({
           ...state,
-          ...(openaiKey ? { openaiKey } : {}),
-          ...(anthropicKey ? { anthropicKey } : {})
+          openai: {
+            ...state.openai,
+            ...(openaiKey ? { apiKey: openaiKey } : {})
+          },
+          anthropic: {
+            ...state.anthropic,
+            ...(anthropicKey ? { apiKey: anthropicKey } : {})
+          }
         }));
       } catch (error) {
         console.log('No existing API keys found in keychain');
@@ -75,22 +87,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   saveSettings: async () => {
-    const { openaiKey, anthropicKey, selectedModel } = get();
+    const state = get();
     set({ isLoading: true });
     try {
       // Save non-sensitive settings to file
+      const { isLoading, setSettings, setModel, setProvider, loadSettings, saveSettings, validateApiKey, ...settingsToSave } = state;
+      
+      // Create a new settings object without API keys
+      const fileSettings: Settings = {
+        ...settingsToSave,
+        openai: { ...settingsToSave.openai, apiKey: '' },
+        anthropic: { ...settingsToSave.anthropic, apiKey: '' }
+      };
+
       await invoke('plugin:fs|write_file', {
         path: SETTINGS_FILE,
-        contents: JSON.stringify({ selectedModel }, null, 2),
+        contents: JSON.stringify(fileSettings, null, 2),
         options: { dir: 'App' }
       });
 
       // Save API keys to keychain
-      if (openaiKey) {
+      if (state.openai.apiKey) {
         await invoke('plugin:os|set_password', {
           service: KEYCHAIN_SERVICE,
           account: 'openai',
-          password: openaiKey
+          password: state.openai.apiKey
         });
       } else {
         await invoke('plugin:os|delete_password', {
@@ -99,11 +120,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         }).catch(() => {});
       }
       
-      if (anthropicKey) {
+      if (state.anthropic.apiKey) {
         await invoke('plugin:os|set_password', {
           service: KEYCHAIN_SERVICE,
           account: 'anthropic',
-          password: anthropicKey
+          password: state.anthropic.apiKey
         });
       } else {
         await invoke('plugin:os|delete_password', {
@@ -115,6 +136,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.error('Failed to save settings:', error);
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  validateApiKey: async (provider: ModelProvider) => {
+    const state = get();
+    const apiKey = provider === 'openai' ? state.openai.apiKey : state.anthropic.apiKey;
+    
+    if (!apiKey) return false;
+
+    try {
+      // Basic format validation
+      if (provider === 'openai' && !apiKey.startsWith('sk-')) return false;
+      if (provider === 'anthropic' && !apiKey.startsWith('sk-ant-')) return false;
+
+      // TODO: Implement actual API validation once we have the backend handlers
+      return true;
+    } catch (error) {
+      console.error(`Failed to validate ${provider} API key:`, error);
+      return false;
     }
   }
 })); 
