@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Send, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -6,8 +6,19 @@ interface Props {
   isLoading: boolean;
 }
 
-export function ChatInput({ onSubmit, isLoading }: Props) {
+export interface ChatInputRef {
+  focus: () => void;
+}
+
+export const ChatInput = forwardRef<ChatInputRef, Props>(({ onSubmit, isLoading }, ref) => {
   const [inputMessage, setInputMessage] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current?.focus();
+    }
+  }));
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -22,6 +33,7 @@ export function ChatInput({ onSubmit, isLoading }: Props) {
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto p-4">
         <div className="flex items-center gap-4">
           <input
+            ref={inputRef}
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
@@ -49,4 +61,4 @@ export function ChatInput({ onSubmit, isLoading }: Props) {
       </form>
     </div>
   );
-} 
+}); 

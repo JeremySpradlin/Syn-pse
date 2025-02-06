@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message, MessageRole } from '../../types/chat';
-import { ChatInput } from './ChatInput';
+import { ChatInput, type ChatInputRef } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
+import { listen } from '@tauri-apps/api/event';
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<ChatInputRef>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -15,6 +17,17 @@ export default function Chat() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Listen for the shortcut release event
+    const unlisten = listen('shortcut-released', () => {
+      chatInputRef.current?.focus();
+    });
+
+    return () => {
+      unlisten.then(unlistenFn => unlistenFn());
+    };
+  }, []);
 
   const handleSubmit = async (content: string) => {
     const userMessage: Message = {
@@ -63,7 +76,7 @@ export default function Chat() {
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <ChatInput onSubmit={handleSubmit} isLoading={isLoading} />
+      <ChatInput ref={chatInputRef} onSubmit={handleSubmit} isLoading={isLoading} />
     </div>
   );
 } 

@@ -28,11 +28,13 @@ fn main() {
                                             shortcut_window.hide().unwrap();
                                         } else {
                                             shortcut_window.show().unwrap();
+                                            // Position window at top of screen
+                                            shortcut_window.set_position(tauri::PhysicalPosition { x: shortcut_window.outer_position().unwrap().x, y: 20 }).unwrap();
                                             shortcut_window.set_focus().unwrap();
                                         }
                                     }
                                     ShortcutState::Released => {
-                                        // Future release event handling here
+                                        let _ = shortcut_window.eval("document.querySelector('input').focus()");
                                         #[cfg(debug_assertions)]
                                         println!("Shortcut released");
                                     }

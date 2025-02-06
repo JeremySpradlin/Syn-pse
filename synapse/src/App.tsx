@@ -8,7 +8,7 @@ export default function App() {
         className="h-10 bg-black/20 backdrop-blur-sm flex items-center px-4 text-gray-300 select-none border-b border-white/5"
       >
         <span className="text-blue-400 font-semibold">Syn</span>
-        <span className="font-semibold">apse</span>
+        <span className="font-semibold">@pse</span>
       </div>
       <div className="flex-1 overflow-hidden">
         <Chat />
