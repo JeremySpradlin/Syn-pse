@@ -4,6 +4,7 @@ import { Settings, DEFAULT_SETTINGS, Model, ModelProvider } from '../types/setti
 
 interface SettingsState extends Settings {
   isLoading: boolean;
+  hasLoaded: boolean;
   setSettings: (settings: Partial<Settings>) => void;
   setModel: (model: Model) => void;
   setProvider: (provider: ModelProvider) => void;
@@ -15,6 +16,7 @@ interface SettingsState extends Settings {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   ...DEFAULT_SETTINGS,
   isLoading: false,
+  hasLoaded: false,
 
   setSettings: (settings) => {
     set((state) => ({ ...state, ...settings }));
@@ -29,6 +31,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   loadSettings: async () => {
+    const state = get();
+    // Skip loading if already loaded and not in a loading state
+    if (state.hasLoaded && !state.isLoading) {
+      return;
+    }
+
     set({ isLoading: true });
     try {
       // Load settings using our Rust commands
@@ -36,6 +44,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const contents = await invoke<string>('load_settings');
         if (contents) {
           const settings = JSON.parse(contents) as Partial<Settings>;
+          console.log('Loaded settings:', {
+            hasOpenAIKey: !!settings.openai?.apiKey,
+            openAIKeyLength: settings.openai?.apiKey?.length,
+            hasAnthropicKey: !!settings.anthropic?.apiKey,
+            anthropicKeyLength: settings.anthropic?.apiKey?.length,
+          });
           set((state) => ({ ...state, ...settings }));
         }
       } catch (error) {
@@ -64,7 +78,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
-      set({ isLoading: false });
+      set({ isLoading: false, hasLoaded: true });  // Set hasLoaded to true when done
     }
   },
 
@@ -72,42 +86,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const state = get();
     set({ isLoading: true });
     try {
-      // Save non-sensitive settings
-      const { isLoading, setSettings, setModel, setProvider, loadSettings, saveSettings, validateApiKey, ...settingsToSave } = state;
+      // Save all settings including API keys
+      const { isLoading, hasLoaded, setSettings, setModel, setProvider, loadSettings, saveSettings, validateApiKey, ...settingsToSave } = state;
       
-      // Create a new settings object without API keys
-      const fileSettings: Settings = {
-        ...settingsToSave,
-        openai: { ...settingsToSave.openai, apiKey: '' },
-        anthropic: { ...settingsToSave.anthropic, apiKey: '' }
-      };
-
-      await invoke('save_settings', {
-        contents: JSON.stringify(fileSettings, null, 2)
+      console.log('Saving settings:', {
+        hasOpenAIKey: !!settingsToSave.openai.apiKey,
+        hasAnthropicKey: !!settingsToSave.anthropic.apiKey
       });
 
-      // Save API keys
-      if (state.openai.apiKey) {
-        await invoke('save_api_key', {
-          provider: 'openai',
-          key: state.openai.apiKey
-        });
-      } else {
-        await invoke('delete_api_key', {
-          provider: 'openai'
-        }).catch(() => {});
-      }
-      
-      if (state.anthropic.apiKey) {
-        await invoke('save_api_key', {
-          provider: 'anthropic',
-          key: state.anthropic.apiKey
-        });
-      } else {
-        await invoke('delete_api_key', {
-          provider: 'anthropic'
-        }).catch(() => {});
-      }
+      // Send the settings directly as they match the Rust Settings struct
+      await invoke('save_settings', {
+        contents: JSON.stringify(settingsToSave, null, 2)
+      });
+
     } catch (error) {
       console.error('Failed to save settings:', error);
     } finally {

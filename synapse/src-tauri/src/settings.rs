@@ -1,6 +1,7 @@
 use keyring::Entry;
 use serde::{Serialize, Deserialize};
 use std::sync::{Mutex, Once};
+use tracing::{info, warn, error, debug};
 
 // Constants for keychain access - using reverse domain name notation for macOS
 const SERVICE_NAME: &str = "com.synapse.settings";
@@ -120,78 +121,155 @@ impl Default for StoredSettings {
 
 #[tauri::command]
 pub fn save_settings(contents: String) -> Result<(), String> {
-    let entry = get_keychain()?;
+    debug!("Attempting to save settings");
+    let entry = match get_keychain() {
+        Ok(entry) => entry,
+        Err(e) => {
+            error!("Failed to get keychain entry: {}", e);
+            return Err(e);
+        }
+    };
 
     // Parse the incoming settings
-    let settings: Settings = serde_json::from_str(&contents)
-        .map_err(|e| format!("Invalid settings format: {}", e))?;
+    let settings: Settings = match serde_json::from_str(&contents) {
+        Ok(settings) => {
+            debug!("Successfully parsed settings JSON");
+            settings
+        }
+        Err(e) => {
+            error!("Failed to parse settings JSON: {}", e);
+            return Err(format!("Invalid settings format: {}", e));
+        }
+    };
 
     // Create StoredSettings from the incoming settings
     let stored_settings = StoredSettings {
         api_keys: ApiKeys {
             openai: if !settings.openai.api_key.is_empty() {
+                debug!("Storing OpenAI API key");
                 Some(settings.openai.api_key.clone())
             } else {
+                debug!("No OpenAI API key provided");
                 None
             },
             anthropic: if !settings.anthropic.api_key.is_empty() {
+                debug!("Storing Anthropic API key");
                 Some(settings.anthropic.api_key.clone())
             } else {
+                debug!("No Anthropic API key provided");
                 None
             },
         },
         settings: Settings {
-            selected_model: settings.selected_model,
-            default_provider: settings.default_provider,
+            selected_model: settings.selected_model.clone(),
+            default_provider: settings.default_provider.clone(),
             openai: OpenAISettings {
                 api_key: String::new(), // Clear API key from main settings
-                org_id: settings.openai.org_id,
+                org_id: settings.openai.org_id.clone(),
                 default_temperature: settings.openai.default_temperature,
                 max_tokens: settings.openai.max_tokens,
-                system_prompt: settings.openai.system_prompt,
+                system_prompt: settings.openai.system_prompt.clone(),
                 use_moderation: settings.openai.use_moderation,
             },
             anthropic: AnthropicSettings {
                 api_key: String::new(), // Clear API key from main settings
                 max_tokens: settings.anthropic.max_tokens,
-                system_prompt: settings.anthropic.system_prompt,
-                stop_sequences: settings.anthropic.stop_sequences,
+                system_prompt: settings.anthropic.system_prompt.clone(),
+                stop_sequences: settings.anthropic.stop_sequences.clone(),
             },
             safety: settings.safety,
         },
     };
 
     // Save everything in a single keychain entry
-    let json = serde_json::to_string(&stored_settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    let json = match serde_json::to_string(&stored_settings) {
+        Ok(json) => {
+            debug!("Successfully serialized settings to JSON");
+            json
+        }
+        Err(e) => {
+            error!("Failed to serialize settings to JSON: {}", e);
+            return Err(format!("Failed to serialize settings: {}", e));
+        }
+    };
 
-    entry.set_password(&json)
-        .map_err(|e| format!("Failed to save to keychain: {}", e))
+    match entry.set_password(&json) {
+        Ok(_) => {
+            info!("Successfully saved settings to keychain");
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to save settings to keychain: {}", e);
+            Err(format!("Failed to save to keychain: {}", e))
+        }
+    }
 }
 
 #[tauri::command]
 pub fn load_settings() -> Result<String, String> {
-    let entry = get_keychain()?;
+    debug!("Attempting to load settings");
+    let entry = match get_keychain() {
+        Ok(entry) => entry,
+        Err(e) => {
+            error!("Failed to get keychain entry: {}", e);
+            return Err(e);
+        }
+    };
 
     match entry.get_password() {
         Ok(stored_json) => {
-            let stored_settings: StoredSettings = serde_json::from_str(&stored_json)
-                .unwrap_or_default();
+            debug!("Successfully retrieved settings from keychain");
+            let stored_settings = serde_json::from_str::<StoredSettings>(&stored_json).map_or_else(
+                |e| {
+                    warn!("Failed to parse stored settings, using defaults: {}", e);
+                    StoredSettings::default()
+                },
+                |settings| {
+                    debug!("Successfully parsed stored settings");
+                    info!("API Keys state: OpenAI present: {}, Anthropic present: {}", 
+                        settings.api_keys.openai.is_some(),
+                        settings.api_keys.anthropic.is_some()
+                    );
+                    settings
+                }
+            );
 
             // Merge API keys back into the settings
             let mut settings = stored_settings.settings;
             if let Some(openai_key) = stored_settings.api_keys.openai {
+                info!("Merging OpenAI API key (length: {})", openai_key.len());
                 settings.openai.api_key = openai_key;
+            } else {
+                info!("No OpenAI API key to merge");
             }
             if let Some(anthropic_key) = stored_settings.api_keys.anthropic {
+                info!("Merging Anthropic API key (length: {})", anthropic_key.len());
                 settings.anthropic.api_key = anthropic_key;
+            } else {
+                info!("No Anthropic API key to merge");
             }
 
-            serde_json::to_string(&settings)
-                .map_err(|e| format!("Failed to serialize settings: {}", e))
+            match serde_json::to_string(&settings) {
+                Ok(json) => {
+                    info!("Successfully loaded and processed settings");
+                    Ok(json)
+                }
+                Err(e) => {
+                    error!("Failed to serialize processed settings: {}", e);
+                    Err(format!("Failed to serialize settings: {}", e))
+                }
+            }
         }
-        Err(_) => Ok(serde_json::to_string(&StoredSettings::default().settings)
-            .unwrap_or_else(|_| "{}".to_string()))
+        Err(e) => {
+            warn!("No existing settings found, using defaults: {}", e);
+            match serde_json::to_string(&StoredSettings::default().settings) {
+                Ok(json) => Ok(json),
+                Err(e) => {
+                    error!("Failed to serialize default settings: {}", e);
+                    Err(format!("Failed to serialize default settings: {}", e))
+                }
+            }
+        }
     }
 }
 

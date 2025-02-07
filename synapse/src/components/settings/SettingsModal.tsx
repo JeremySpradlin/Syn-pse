@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { X, Check, AlertCircle, ChevronDown } from 'lucide-react';
 import { useSettingsStore } from '../../store/settingsStore';
 import { Model, ModelProvider, ContentFilterLevel } from '../../types/settings';
@@ -15,6 +15,7 @@ export default function SettingsModal({ onClose }: Props) {
     anthropic,
     safety,
     isLoading,
+    hasLoaded,
     setSettings,
     setModel,
     setProvider,
@@ -27,20 +28,32 @@ export default function SettingsModal({ onClose }: Props) {
   const [anthropicKeyValid, setAnthropicKeyValid] = useState(false);
   const [activeTab, setActiveTab] = useState<'models' | 'safety'>('models');
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const loadingRef = useRef(false);
 
   const isOpenAIModel = selectedModel.includes('gpt');
 
+  // Effect for initial settings load
   useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+    const loadInitialSettings = async () => {
+      if (!hasLoaded && !loadingRef.current) {
+        loadingRef.current = true;
+        await loadSettings();
+        loadingRef.current = false;
+      }
+    };
+    loadInitialSettings();
+  }, [hasLoaded, loadSettings]);
 
+  // Separate effect for key validation
   useEffect(() => {
     const validateKeys = async () => {
       setOpenaiKeyValid(await validateApiKey('openai'));
       setAnthropicKeyValid(await validateApiKey('anthropic'));
     };
-    validateKeys();
-  }, [openai.apiKey, anthropic.apiKey, validateApiKey]);
+    if (hasLoaded) {
+      validateKeys();
+    }
+  }, [hasLoaded, openai.apiKey, anthropic.apiKey, validateApiKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +65,15 @@ export default function SettingsModal({ onClose }: Props) {
     const isOpenAI = provider === 'openai';
     const settings = isOpenAI ? openai : anthropic;
     const keyValid = isOpenAI ? openaiKeyValid : anthropicKeyValid;
+    
+    // More detailed logging
+    console.log(`${provider} API key state:`, {
+      apiKey: settings.apiKey,
+      hasKey: Boolean(settings.apiKey),
+      keyLength: settings.apiKey?.length,
+      isValid: keyValid,
+      placeholder: settings.apiKey ? "••••••••" : isOpenAI ? "sk-..." : "sk-ant-..."
+    });
     
     return (
       <div className="space-y-4">
@@ -74,19 +96,26 @@ export default function SettingsModal({ onClose }: Props) {
             </span>
           )}
         </div>
-        <input
-          id={`${provider}-key`}
-          type="password"
-          value={settings.apiKey}
-          onChange={(e) => setSettings({ 
-            [provider]: { ...settings, apiKey: e.target.value }
-          })}
-          className="w-full px-4 py-2.5 bg-black/20 text-gray-100 rounded-xl
-            border border-white/10 focus:outline-none focus:ring-2 
-            focus:ring-blue-500/50 transition-all"
-          placeholder={isOpenAI ? "sk-..." : "sk-ant-..."}
-          disabled={isLoading}
-        />
+        <div className="relative">
+          <input
+            id={`${provider}-key`}
+            type="password"
+            value={settings.apiKey || ''}
+            onChange={(e) => setSettings({ 
+              [provider]: { ...settings, apiKey: e.target.value }
+            })}
+            className="w-full px-4 py-2.5 bg-black/20 text-gray-100 rounded-xl
+              border border-white/10 focus:outline-none focus:ring-2 
+              focus:ring-blue-500/50 transition-all"
+            placeholder={Boolean(settings.apiKey) ? "••••••••" : isOpenAI ? "sk-..." : "sk-ant-..."}
+            disabled={isLoading}
+          />
+          {Boolean(settings.apiKey) && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+              API key stored
+            </div>
+          )}
+        </div>
       </div>
     );
   };
