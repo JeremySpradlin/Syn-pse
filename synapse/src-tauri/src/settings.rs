@@ -1,25 +1,27 @@
 use keyring::Entry;
 use serde::{Serialize, Deserialize};
-use std::sync::Once;
+use std::sync::{Mutex, Once};
 
-// Constants for keychain access
-const SERVICE_NAME: &str = "com.synapse.app";
-const SETTINGS_KEY: &str = "app_settings";
+// Constants for keychain access - using reverse domain name notation for macOS
+const SERVICE_NAME: &str = "com.synapse.settings";
+const SETTINGS_KEY: &str = "user-settings";
+
+// Global keychain entry
+static KEYCHAIN: Mutex<Option<Entry>> = Mutex::new(None);
 static INIT: Once = Once::new();
 
 // Initialize keychain access once
-fn init_keychain() -> Result<Entry, String> {
-    let entry = Entry::new(SERVICE_NAME, SETTINGS_KEY)
-        .map_err(|e| format!("Failed to initialize keychain: {}", e))?;
-    Ok(entry)
-}
+fn get_keychain() -> Result<Entry, String> {
+    INIT.call_once(|| {
+        // Create a single persistent entry for all settings
+        if let Ok(entry) = Entry::new(SERVICE_NAME, SETTINGS_KEY) {
+            let _ = KEYCHAIN.lock().unwrap().insert(entry);
+        }
+    });
 
-#[derive(Debug, thiserror::Error, Serialize)]
-pub enum SettingsError {
-    #[error("Keychain error: {0}")]
-    KeychainError(String),
-    #[error("JSON error: {0}")]
-    JsonError(String),
+    // Always return a new Entry with the same service name and key
+    Entry::new(SERVICE_NAME, SETTINGS_KEY)
+        .map_err(|e| format!("Failed to access keychain: {}", e))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,13 +120,7 @@ impl Default for StoredSettings {
 
 #[tauri::command]
 pub fn save_settings(contents: String) -> Result<(), String> {
-    // Initialize keychain access if not already done
-    INIT.call_once(|| {
-        let _ = init_keychain();
-    });
-
-    let entry = Entry::new(SERVICE_NAME, SETTINGS_KEY)
-        .map_err(|e| format!("Failed to access keychain: {}", e))?;
+    let entry = get_keychain()?;
 
     // Parse the incoming settings
     let settings: Settings = serde_json::from_str(&contents)
@@ -175,13 +171,7 @@ pub fn save_settings(contents: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn load_settings() -> Result<String, String> {
-    // Initialize keychain access if not already done
-    INIT.call_once(|| {
-        let _ = init_keychain();
-    });
-
-    let entry = Entry::new(SERVICE_NAME, SETTINGS_KEY)
-        .map_err(|e| format!("Failed to access keychain: {}", e))?;
+    let entry = get_keychain()?;
 
     match entry.get_password() {
         Ok(stored_json) => {
