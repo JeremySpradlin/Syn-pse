@@ -26,6 +26,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [openaiKeyValid, setOpenaiKeyValid] = useState(false);
   const [anthropicKeyValid, setAnthropicKeyValid] = useState(false);
   const [activeTab, setActiveTab] = useState<'models' | 'safety'>('models');
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
 
   const isOpenAIModel = selectedModel.includes('gpt');
 
@@ -139,31 +140,66 @@ export default function SettingsModal({ onClose }: Props) {
                     Default Model
                   </label>
                   <div className="relative">
-                    <select
-                      id="model"
-                      value={selectedModel}
-                      onChange={(e) => {
-                        const model = e.target.value as Model;
-                        setModel(model);
-                        setProvider(model.includes('gpt') ? 'openai' : 'anthropic');
-                      }}
+                    <button
+                      type="button"
+                      onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                       className="w-full px-4 py-2.5 bg-black/20 text-gray-100 rounded-xl
                         border border-white/10 focus:outline-none focus:ring-2 
-                        focus:ring-blue-500/50 transition-all appearance-none"
+                        focus:ring-blue-500/50 transition-all flex justify-between items-center"
                       disabled={isLoading}
                     >
-                      <optgroup label="OpenAI Models">
-                        <option value="gpt-4-turbo-preview">GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                      </optgroup>
-                      <optgroup label="Anthropic Models">
-                        <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                        <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-                        <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-                        <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                      </optgroup>
-                    </select>
-                    <ChevronDown className="absolute right-3 top-3 w-5 h-5 text-gray-400 pointer-events-none" />
+                      <span>{selectedModel}</span>
+                      <ChevronDown className="h-5 w-5 text-gray-400" />
+                    </button>
+                    
+                    {isModelDropdownOpen && (
+                      <div className="absolute z-50 w-full mt-2 bg-gray-900 rounded-xl border border-white/10 shadow-lg">
+                        <div className="py-1">
+                          <div className="px-3 py-2 text-sm text-gray-400">OpenAI Models</div>
+                          {['gpt-4-turbo-preview', 'gpt-3.5-turbo'].map((model) => (
+                            <button
+                              key={model}
+                              type="button"
+                              className={`w-full px-4 py-2 text-left text-sm hover:bg-white/5 ${
+                                selectedModel === model ? 'text-blue-400' : 'text-gray-100'
+                              }`}
+                              onClick={() => {
+                                setModel(model as Model);
+                                setProvider('openai');
+                                setIsModelDropdownOpen(false);
+                              }}
+                            >
+                              {model}
+                            </button>
+                          ))}
+                          
+                          <div className="px-3 py-2 text-sm text-gray-400 border-t border-white/10 mt-1">
+                            Anthropic Models
+                          </div>
+                          {[
+                            'claude-3-opus-20240229',
+                            'claude-3-sonnet-20240229',
+                            'claude-3-haiku-20240307',
+                            'claude-3-5-sonnet-20241022'
+                          ].map((model) => (
+                            <button
+                              key={model}
+                              type="button"
+                              className={`w-full px-4 py-2 text-left text-sm hover:bg-white/5 ${
+                                selectedModel === model ? 'text-blue-400' : 'text-gray-100'
+                              }`}
+                              onClick={() => {
+                                setModel(model as Model);
+                                setProvider('anthropic');
+                                setIsModelDropdownOpen(false);
+                              }}
+                            >
+                              {model}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

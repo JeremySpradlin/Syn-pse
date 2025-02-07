@@ -70,7 +70,11 @@
         "transparent": true,
         "alwaysOnTop": true,
         "center": true,
-        "y": 20
+        "y": 20,
+        "skipTaskbar": true,
+        "visible": false,
+        "hiddenTitle": true,
+        "theme": "Dark"
       }
     ]
   }
