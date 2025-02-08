@@ -1,28 +1,21 @@
 use keyring::Entry;
 use serde::{Serialize, Deserialize};
-use std::sync::{Mutex, Once};
 use tracing::{info, warn, error, debug};
+use once_cell::sync::OnceCell;
 
 // Constants for keychain access - using reverse domain name notation for macOS
 const SERVICE_NAME: &str = "com.synapse.settings";
 const SETTINGS_KEY: &str = "user-settings";
 
-// Global keychain entry
-static KEYCHAIN: Mutex<Option<Entry>> = Mutex::new(None);
-static INIT: Once = Once::new();
+static KEYCHAIN: OnceCell<Entry> = OnceCell::new();
+static CACHED_SYSTEM_PROMPT: OnceCell<String> = OnceCell::new();
 
-// Initialize keychain access once
-fn get_keychain() -> Result<Entry, String> {
-    INIT.call_once(|| {
-        // Create a single persistent entry for all settings
-        if let Ok(entry) = Entry::new(SERVICE_NAME, SETTINGS_KEY) {
-            let _ = KEYCHAIN.lock().unwrap().insert(entry);
-        }
-    });
-
-    // Always return a new Entry with the same service name and key
-    Entry::new(SERVICE_NAME, SETTINGS_KEY)
-        .map_err(|e| format!("Failed to access keychain: {}", e))
+// Initialize keychain access
+fn get_keychain() -> Result<&'static Entry, String> {
+    KEYCHAIN.get_or_try_init(|| {
+        Entry::new(SERVICE_NAME, SETTINGS_KEY)
+            .map_err(|e| format!("Failed to access keychain: {}", e))
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,9 +124,12 @@ pub fn save_settings(contents: String) -> Result<(), String> {
     };
 
     // Parse the incoming settings
-    let settings: Settings = match serde_json::from_str(&contents) {
+    let settings = match serde_json::from_str::<Settings>(&contents) {
         Ok(settings) => {
             debug!("Successfully parsed settings JSON");
+            if CACHED_SYSTEM_PROMPT.get().is_none() {
+                let _ = CACHED_SYSTEM_PROMPT.set(settings.openai.system_prompt.clone());
+            }
             settings
         }
         Err(e) => {
@@ -142,29 +138,17 @@ pub fn save_settings(contents: String) -> Result<(), String> {
         }
     };
 
-    // Create StoredSettings from the incoming settings
+    // Create StoredSettings
     let stored_settings = StoredSettings {
         api_keys: ApiKeys {
-            openai: if !settings.openai.api_key.is_empty() {
-                debug!("Storing OpenAI API key");
-                Some(settings.openai.api_key.clone())
-            } else {
-                debug!("No OpenAI API key provided");
-                None
-            },
-            anthropic: if !settings.anthropic.api_key.is_empty() {
-                debug!("Storing Anthropic API key");
-                Some(settings.anthropic.api_key.clone())
-            } else {
-                debug!("No Anthropic API key provided");
-                None
-            },
+            openai: (!settings.openai.api_key.is_empty()).then(|| settings.openai.api_key.clone()),
+            anthropic: (!settings.anthropic.api_key.is_empty()).then(|| settings.anthropic.api_key.clone()),
         },
         settings: Settings {
             selected_model: settings.selected_model.clone(),
             default_provider: settings.default_provider.clone(),
             openai: OpenAISettings {
-                api_key: String::new(), // Clear API key from main settings
+                api_key: String::new(),
                 org_id: settings.openai.org_id.clone(),
                 default_temperature: settings.openai.default_temperature,
                 max_tokens: settings.openai.max_tokens,
@@ -172,7 +156,7 @@ pub fn save_settings(contents: String) -> Result<(), String> {
                 use_moderation: settings.openai.use_moderation,
             },
             anthropic: AnthropicSettings {
-                api_key: String::new(), // Clear API key from main settings
+                api_key: String::new(),
                 max_tokens: settings.anthropic.max_tokens,
                 system_prompt: settings.anthropic.system_prompt.clone(),
                 stop_sequences: settings.anthropic.stop_sequences.clone(),
@@ -181,7 +165,6 @@ pub fn save_settings(contents: String) -> Result<(), String> {
         },
     };
 
-    // Save everything in a single keychain entry
     let json = match serde_json::to_string(&stored_settings) {
         Ok(json) => {
             debug!("Successfully serialized settings to JSON");
@@ -193,16 +176,14 @@ pub fn save_settings(contents: String) -> Result<(), String> {
         }
     };
 
-    match entry.set_password(&json) {
-        Ok(_) => {
-            info!("Successfully saved settings to keychain");
-            Ok(())
-        }
-        Err(e) => {
+    entry.set_password(&json)
+        .map_err(|e| {
             error!("Failed to save settings to keychain: {}", e);
-            Err(format!("Failed to save to keychain: {}", e))
-        }
-    }
+            format!("Failed to save to keychain: {}", e)
+        })?;
+
+    info!("Successfully saved settings to keychain");
+    Ok(())
 }
 
 #[tauri::command]
@@ -230,6 +211,9 @@ pub fn load_settings() -> Result<String, String> {
                         settings.api_keys.openai.is_some(),
                         settings.api_keys.anthropic.is_some()
                     );
+                    if CACHED_SYSTEM_PROMPT.get().is_none() {
+                        let _ = CACHED_SYSTEM_PROMPT.set(settings.settings.openai.system_prompt.clone());
+                    }
                     settings
                 }
             );

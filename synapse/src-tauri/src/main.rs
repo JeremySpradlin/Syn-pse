@@ -25,8 +25,16 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             info!("Setting up Tauri application");
-            let window = app.get_window("main").unwrap();
-            window.hide().unwrap();
+            let window = match app.get_window("main") {
+                Some(w) => w,
+                None => {
+                    info!("Main window not found");
+                    return Ok(());
+                }
+            };
+            if let Err(e) = window.hide() {
+                info!("Error hiding window: {:?}", e);
+            }
 
             let mut shortcut = app.global_shortcut_manager();
             let shortcut_window = window.clone();
@@ -34,21 +42,37 @@ fn main() {
             // Register global shortcut
             info!("Registering global shortcut");
             shortcut.register("Shift+Command+Space", move || {
-                if shortcut_window.is_visible().unwrap() {
-                    info!("Hiding window");
-                    shortcut_window.hide().unwrap();
-                } else {
-                    info!("Showing window");
-                    shortcut_window.show().unwrap();
-                    // Position window at top of screen
-                    shortcut_window.set_position(tauri::Position::Physical(
-                        tauri::PhysicalPosition { 
-                            x: shortcut_window.outer_position().unwrap().x, 
-                            y: 20 
+                match shortcut_window.is_visible() {
+                    Ok(true) => {
+                        info!("Hiding window");
+                        if let Err(e) = shortcut_window.hide() {
+                            info!("Error hiding window: {:?}", e);
                         }
-                    )).unwrap();
-                    shortcut_window.set_focus().unwrap();
-                    let _ = shortcut_window.eval("document.querySelector('input')?.focus()");
+                    },
+                    Ok(false) => {
+                        info!("Showing window");
+                        if let Err(e) = shortcut_window.show() {
+                            info!("Error showing window: {:?}", e);
+                        }
+                        if let Ok(pos) = shortcut_window.outer_position() {
+                            if let Err(e) = shortcut_window.set_position(tauri::Position::Physical(
+                                tauri::PhysicalPosition { x: pos.x, y: 20 }
+                            )) {
+                                info!("Error setting window position: {:?}", e);
+                            }
+                        } else {
+                            info!("Could not retrieve window position");
+                        }
+                        if let Err(e) = shortcut_window.set_focus() {
+                            info!("Error focusing window: {:?}", e);
+                        }
+                        if let Err(e) = shortcut_window.eval("document.querySelector('input')?.focus()") {
+                            info!("Error evaluating JS to focus input: {:?}", e);
+                        }
+                    },
+                    Err(e) => {
+                        info!("Error retrieving window visibility: {:?}", e);
+                    }
                 }
             }).expect("Failed to register global shortcut");
 
