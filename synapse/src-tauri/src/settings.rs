@@ -257,6 +257,7 @@ pub fn load_settings() -> Result<String, String> {
     }
 }
 
+// Remove these deprecated functions at the end of the file
 // These commands are now deprecated as we handle API keys in the main settings
 #[tauri::command]
 pub fn save_api_key(_provider: String, _key: String) -> Result<(), String> {

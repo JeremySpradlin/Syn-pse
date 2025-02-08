@@ -2,10 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{GlobalShortcutManager, Manager};
-use tracing::{info, Level};
+use tracing::{info, error, Level};
 use tracing_subscriber::FmtSubscriber;
 mod settings;
-use settings::{save_settings, load_settings, save_api_key, load_api_key, delete_api_key};
+use settings::{save_settings, load_settings};
 
 fn main() {
     // Initialize logging
@@ -28,12 +28,12 @@ fn main() {
             let window = match app.get_window("main") {
                 Some(w) => w,
                 None => {
-                    info!("Main window not found");
+                    error!("Main window not found");
                     return Ok(());
                 }
             };
             if let Err(e) = window.hide() {
-                info!("Error hiding window: {:?}", e);
+                error!("Error hiding window: {:?}", e);
             }
 
             let mut shortcut = app.global_shortcut_manager();
@@ -46,32 +46,32 @@ fn main() {
                     Ok(true) => {
                         info!("Hiding window");
                         if let Err(e) = shortcut_window.hide() {
-                            info!("Error hiding window: {:?}", e);
+                            error!("Error hiding window: {:?}", e);
                         }
                     },
                     Ok(false) => {
                         info!("Showing window");
                         if let Err(e) = shortcut_window.show() {
-                            info!("Error showing window: {:?}", e);
+                            error!("Error showing window: {:?}", e);
                         }
                         if let Ok(pos) = shortcut_window.outer_position() {
                             if let Err(e) = shortcut_window.set_position(tauri::Position::Physical(
                                 tauri::PhysicalPosition { x: pos.x, y: 20 }
                             )) {
-                                info!("Error setting window position: {:?}", e);
+                                error!("Error setting window position: {:?}", e);
                             }
                         } else {
-                            info!("Could not retrieve window position");
+                            error!("Could not retrieve window position");
                         }
                         if let Err(e) = shortcut_window.set_focus() {
-                            info!("Error focusing window: {:?}", e);
+                            error!("Error focusing window: {:?}", e);
                         }
                         if let Err(e) = shortcut_window.eval("document.querySelector('input')?.focus()") {
-                            info!("Error evaluating JS to focus input: {:?}", e);
+                            error!("Error evaluating JS to focus input: {:?}", e);
                         }
                     },
                     Err(e) => {
-                        info!("Error retrieving window visibility: {:?}", e);
+                        error!("Error retrieving window visibility: {:?}", e);
                     }
                 }
             }).expect("Failed to register global shortcut");
@@ -81,9 +81,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             save_settings,
             load_settings,
-            save_api_key,
-            load_api_key,
-            delete_api_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
